@@ -69,7 +69,7 @@ $(src_dir) $(tests_dir):
 .PHONY: setup ### install venv and its requirements for package development
 setup: install-venv install-requirements
 
-package := advent_code_2015
+package := advent_of_code_2024
 venv := .venv
 pyseed ?= $(shell command -v python3 2> /dev/null)
 python := $(venv)/bin/python
@@ -108,6 +108,8 @@ $(requirements):
 	@echo "pytest" >> $@
 	@echo "pytest-cov" >> $@
 	@echo "pytest-mock" >> $@
+	@echo "pytest-datafiles" >> $@
+	@echo "pytest-datadir" >> $@
 	@echo "pylint" >> $@
 	@echo "pylint-junit" >> $@
 	@echo "autopep8" >> $@
@@ -172,8 +174,12 @@ $(packagerc):
 	@echo '[project]' >> $@
 	@echo 'name = "$(package)"' >> $@
 	@echo 'version = "0.0.1"' >> $@
-	@echo 'requires-python = ">=$(shell $(python) --version | grep -oP "\d.\d+")"' >> $@
+	@echo 'requires-python = ">=$(shell ($(python) --version 2> /dev/null || echo "3.10") | grep -oP "\d.\d+")"' >> $@
 	@echo 'dependencies = []' >> $@
+	@echo '[tool.setuptools.package-data]' >> $@
+	@echo '"$(package)" = ["py.typed"]' >> $@
+	@echo '[tool.setuptools.packages.find]' >> $@
+	@echo 'where = ["src"]' >> $@
 
 .PHONY: uninstall-package ### uninstall package from venv
 uninstall-package:
@@ -192,28 +198,39 @@ clean-package:
 	@rm -rf $(package_stamp) $(src_dir)/$(package_egg)
 	@$(call del_gitignore,$(package_egg))
 
-sample_package := $(src_dir)/sample_$(package).py
-sample_tests := $(tests_dir)/test_sample_$(package).py
+sample_package := $(src_dir)/$(package)
+sample_module := $(sample_package)/sample.py
+sample_tests := $(tests_dir)/sample
+sample_zero_test := $(sample_tests)/test_zero_function.py
+sample_pytyped_marker := $(sample_package)/py.typed
+sample_init := $(sample_package)/__init__.py
 sample_readme := README.md
 sample_license := LICENSE
 
 .PHONY: sample ### sample module to use as structure and example
 sample: $(sample_package) $(sample_tests)
 sample: $(sample_readme) $(sample_license)
+sample: $(sample_init) $(sample_pytyped_marker)
+sample: $(sample_module) $(sample_zero_test)
+sample: $(packagerc)
 
-$(sample_package): | $(src_dir)
-	@echo "def sample(): return 0" >> $@
+$(sample_package) $(sample_tests):
+	@mkdir --parents $@
+
+$(sample_init) $(sample_pytyped_marker):
+	@touch $@
+
+$(sample_module): | $(sample_package)
+	@echo "def sample() -> int: return 0" > $@
 	@$(call log,'install sample $@',$(donestr))
 
-$(sample_tests): | $(tests_dir)
-	@echo "import pytest" >> $@
-	@echo "from $(basename $(notdir $(sample_package))) import sample" >> $@
+$(sample_zero_test): | $(sample_tests)
+	@echo "from $(basename $(notdir $(sample_package))).sample import sample" > $@
 	@echo "def test_scenario_1(): assert sample() == 0" >> $@
-	@echo "def test_scenario_2(): assert not sample() != 0" >> $@
 	@$(call log,'install sample $@',$(donestr))
 
 $(sample_readme):
-	@echo '# $(package)' >> $@
+	@echo '# $(package)' > $@
 	@echo 'Elevator pitch.' >> $@
 	@echo '## Install' >> $@
 	@echo '```' >> $@
@@ -235,13 +252,13 @@ $(sample_readme):
 	@$(call log,'install sample $@',$(donestr))
 
 $(sample_license):
-	@echo 'MIT License' >> $@
+	@echo 'MIT License' > $@
 	@echo '[get the text](https://choosealicense.com/licenses/mit/)' >> $@
 	@$(call log,'install sample $@',$(donestr))
 
 .PHONY: clean-sample-code ### remove sample_* files
 clean-sample-code:
-	@rm -rf $(sample_package) $(sample_tests)
+	@rm -rf $(sample_module) $(sample_tests)
 	@$(call log,'clean $(sample_package) and $(sample_tests)',$(donestr))
 
 .PHONY: clean-sample-aux ### remove sample auxiliary files
@@ -387,7 +404,7 @@ formatter_module_import_sort += --atomic
 formatter_module_add_trailing_comma := add_trailing_comma
 formatter_module_add_trailing_comma += --exit-zero-even-if-changed
 
-pyfiles:=$(shell find $(src_dir)/ $(tests_dir)/ -type f -name '*.py')
+pyfiles:=$(shell find $(src_dir)/ $(tests_dir)/ -type f -name '*.py' 2> /dev/null)
 ifneq ($(module),$(package))
 	formatter_module_pep8 += $(module)
 	formatter_module_import_sort += $(module)
@@ -433,13 +450,32 @@ $(ipython):
 	@$(call log,'install ipython into virtual environment',$(donestr))
 
 jupyter := $(venv)/bin/jupyter
+
 .PHONY: run-jupyter ### virtual env jupyter server
 run-jupyter: $(jupyter)
-	$< notebook
+	$< lab
 
-$(jupyter): $(python)
-	@$(pip) install notebook nb_mypy > /dev/null
+jupyter_extensions := nb_mypy
+jupyter_extensions += jupyterlab-vim
+jupyter_extensions += jupytext
+jupytextrc := jupytext.toml
+jupyter_pairs_dir := notebook_pairs
+ipynb_dir := $(jupyter_pairs_dir)/ipynbs
+py_dir := $(jupyter_pairs_dir)/pys
+
+$(ipynb_dir) $(py_dir):
+	mkdir -p $@
+
+$(jupyter): $(python) | $(jupytextrc) $(ipynb_dir) $(py_dir)
+	@$(call add_gitignore,.ipynb_checkpoints)
+	@$(call add_gitignore,"$(ipynb_dir)/")
+	@$(pip) install notebook $(jupyter_extensions) > /dev/null
 	@$(call log,'install jupyter into virtual environment',$(donestr))
+
+$(jupytextrc):
+	@echo '[formats]' >> $@
+	@echo '"$(ipynb_dir)/" = "ipynb"' >> $@
+	@echo '"$(py_dir)/" = "py:percent"' >> $@
 
 .PHONY: TAGS ### create tags file
 TAGS:
